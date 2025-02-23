@@ -1,23 +1,11 @@
-import logo from './logo.svg';
-import './App.css';
+import React from "react";
+import TakerFinder from "./components/TakerFinder";
 
 function App() {
   return (
     <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+      <h1>Polygon Trade Taker Finder</h1>
+      <TakerFinder transactionHash="0xc17423a5841c885c66746f38b5700def004afead5941496be5590d4be200c7c4" />
     </div>
   );
 }
