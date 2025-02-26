@@ -3,34 +3,31 @@ import { ethers } from "ethers";
 
 const provider = new ethers.JsonRpcProvider("https://polygon-rpc.com/");
 
-const abi = [
-  "event OrderFilled(bytes32 indexed orderHash, address indexed maker, address indexed taker, uint256 makerAssetId, uint256 takerAssetId, uint256 makerAmountFilled, uint256 takerAmountFilled, uint256 fee)",
-  "event Transfer(address indexed from, address indexed to, uint256 value)",
-  "event Approval(address indexed owner, address indexed spender, uint256 value)",
-  "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)",
-];
-
-const iface = new ethers.Interface(abi);
-
 const orderFilledTopic = ethers.keccak256(
   ethers.toUtf8Bytes(
     "OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)"
   )
 );
 
-const TakerFinder = ({ transactionHash }) => {
-  const [eventData, setEventData] = useState([]);
+const TakerFinder = () => {
+  const [transactionHash, setTransactionHash] = useState("");
+  const [traderAddress, setTraderAddress] = useState("");
+  const [tradeDetails, setTradeDetails] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [taker, setTaker] = useState(null);
 
   const fetchTradeData = async () => {
     setLoading(true);
     setError(null);
-    setEventData([]);
-    setTaker(null);
+    setTradeDetails([]);
 
     try {
+      if (!ethers.isAddress(traderAddress)) {
+        setError("Invalid Ethereum address.");
+        setLoading(false);
+        return;
+      }
+
       const receipt = await provider.getTransactionReceipt(transactionHash);
       if (!receipt) {
         setError("Transaction not found.");
@@ -39,104 +36,42 @@ const TakerFinder = ({ transactionHash }) => {
       }
 
       const logs = receipt.logs;
-      const parsedEvents = [];
       const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      let trades = [];
 
       for (const log of logs) {
-        try {
-          console.log("Raw Log:", log);
+        if (log.topics[0] === orderFilledTopic) {
+          const maker = ethers.getAddress("0x" + log.topics[2].slice(-40));
+          const taker = ethers.getAddress("0x" + log.topics[3].slice(-40));
 
-          let eventDetails = { type: "Unknown Event" };
-
-          if (log.topics[0] === orderFilledTopic) {
-            console.log("✅ OrderFilled event found!");
-
-            const decodedTopics = {
-              orderHash: log.topics[1],
-              maker: ethers.getAddress("0x" + log.topics[2].slice(-40)),
-              taker: ethers.getAddress("0x" + log.topics[3].slice(-40)),
-            };
-
+          if (maker.toLowerCase() === traderAddress.toLowerCase()) {
             const decodedData = abiCoder.decode(
               ["uint256", "uint256", "uint256", "uint256", "uint256"],
               log.data
             );
 
-            eventDetails = {
-              type: "OrderFilled",
-              ...decodedTopics,
+            trades.push({
+              orderHash: log.topics[1],
+              maker,
+              taker,
               makerAssetId: decodedData[0].toString(),
               takerAssetId: decodedData[1].toString(),
               makerAmountFilled: decodedData[2].toString(),
               takerAmountFilled: decodedData[3].toString(),
               fee: decodedData[4].toString(),
-            };
-          } else {
-            let parsedLog;
-            try {
-              parsedLog = iface.parseLog(log);
-            } catch (e) {
-              console.warn("Skipping unmatched log:", e.message);
-              continue;
-            }
-
-            if (!parsedLog || !parsedLog.name) {
-              console.warn("Parsed log is missing a name. Skipping...");
-              continue;
-            }
-
-            console.log("Parsed Event:", parsedLog.name, parsedLog.args);
-
-            switch (parsedLog.name) {
-              case "Transfer":
-                eventDetails = {
-                  type: "Transfer",
-                  from: parsedLog.args.from,
-                  to: parsedLog.args.to,
-                  value: parsedLog.args.value.toString(),
-                };
-                break;
-
-              case "Approval":
-                eventDetails = {
-                  type: "Approval",
-                  owner: parsedLog.args.owner,
-                  spender: parsedLog.args.spender,
-                  value: parsedLog.args.value.toString(),
-                };
-                break;
-
-              case "TransferSingle":
-                eventDetails = {
-                  type: "TransferSingle",
-                  operator: parsedLog.args.operator,
-                  from: parsedLog.args.from,
-                  to: parsedLog.args.to,
-                  tokenId: parsedLog.args.id.toString(),
-                  value: parsedLog.args.value.toString(),
-                };
-                break;
-              default:
-                break;
-            }
+            });
           }
-
-          parsedEvents.push(eventDetails);
-        } catch (error) {
-          console.warn("Skipping unmatched log due to error:", error.message);
         }
       }
 
-      if (parsedEvents.length === 0) {
-        setError("No relevant events found in this transaction.");
+      if (trades.length === 0) {
+        setError("No trades found where this user was a maker.");
       } else {
-        setEventData(parsedEvents);
+        setTradeDetails(trades);
       }
     } catch (error) {
       console.error("Error fetching trade data:", error);
-      setError(
-        "Failed to retrieve trade information. Please check the inputs."
-      );
+      setError("Failed to retrieve trade information.");
     }
     setLoading(false);
   };
@@ -152,10 +87,42 @@ const TakerFinder = ({ transactionHash }) => {
         backgroundColor: "#f9f9f9",
       }}
     >
-      <h3 style={{ textAlign: "center" }}>Polygon Trade Taker Finder</h3>
-      <p>
-        <strong>Transaction Hash:</strong> {transactionHash}
-      </p>
+      <h3 style={{ textAlign: "center" }}>Find All Trades for Maker</h3>
+
+      <div style={{ marginBottom: "10px" }}>
+        <label>Transaction Hash:</label>
+        <input
+          type="text"
+          value={transactionHash}
+          onChange={(e) => setTransactionHash(e.target.value)}
+          placeholder="Enter transaction hash"
+          style={{
+            width: "100%",
+            padding: "8px",
+            marginTop: "5px",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: "10px" }}>
+        <label>Trader Address (Maker):</label>
+        <input
+          type="text"
+          value={traderAddress}
+          onChange={(e) => setTraderAddress(e.target.value)}
+          placeholder="Enter trader (maker) address"
+          style={{
+            width: "100%",
+            padding: "8px",
+            marginTop: "5px",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+          }}
+        />
+      </div>
+
       <button
         onClick={fetchTradeData}
         disabled={loading}
@@ -170,35 +137,65 @@ const TakerFinder = ({ transactionHash }) => {
           cursor: "pointer",
         }}
       >
-        {loading ? "Fetching..." : "Find Taker & Events"}
+        {loading ? "Fetching..." : "Find Trades"}
       </button>
+
       {error && (
         <p style={{ color: "red", textAlign: "center" }}>
           <strong>Error:</strong> {error}
         </p>
       )}
-      {taker && (
-        <p style={{ color: "green", textAlign: "center", fontSize: "18px" }}>
-          <strong>Taker Found:</strong> {taker}
-        </p>
-      )}
-      {eventData.length > 0 && (
-        <div style={{ marginTop: "20px" }}>
-          <h4 style={{ textAlign: "center" }}>Transaction Events:</h4>
-          {eventData.map((event, index) => (
+
+      {tradeDetails.length > 0 && (
+        <div
+          style={{
+            marginTop: "20px",
+            padding: "10px",
+            background: "#eaffea",
+            borderRadius: "5px",
+          }}
+        >
+          <h4 style={{ textAlign: "center" }}>Trade History</h4>
+          {tradeDetails.map((trade, index) => (
             <div
               key={index}
-              style={{ padding: "10px", borderBottom: "1px solid #ddd" }}
+              style={{
+                marginBottom: "15px",
+                padding: "10px",
+                borderBottom: "1px solid #ddd",
+              }}
             >
-              <h5 style={{ color: "#333" }}>Type: {event.type}</h5>
-              {Object.entries(event).map(
-                ([key, value]) =>
-                  key !== "type" && (
-                    <p key={key}>
-                      <strong>{key}:</strong> {value}
-                    </p>
-                  )
-              )}
+              <p>
+                <strong>Order Hash:</strong> {trade.orderHash}
+              </p>
+              <p>
+                <strong>Maker:</strong> {trade.maker}
+              </p>
+              <p>
+                <strong>Taker:</strong>{" "}
+                <a
+                  href={`https://www.betmoar.fun/profile/${trade.taker}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {trade.taker}
+                </a>
+              </p>
+              <p>
+                <strong>Maker Asset ID:</strong> {trade.makerAssetId}
+              </p>
+              <p>
+                <strong>Taker Asset ID:</strong> {trade.takerAssetId}
+              </p>
+              <p>
+                <strong>Maker Amount Filled:</strong> {trade.makerAmountFilled}
+              </p>
+              <p>
+                <strong>Taker Amount Filled:</strong> {trade.takerAmountFilled}
+              </p>
+              <p>
+                <strong>Fee:</strong> {trade.fee}
+              </p>
             </div>
           ))}
         </div>
